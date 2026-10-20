@@ -28,6 +28,22 @@ public class SleepTimerActivity extends Activity {
         long left = SleepTimer.remainingMs(this);
         View first = null;
 
+        if (left > 0) {
+            long totalSec = left / 1000L;
+            String remaining = totalSec >= 3600
+                    ? String.format(java.util.Locale.US, "%d:%02d:%02d",
+                            totalSec / 3600, (totalSec % 3600) / 60, totalSec % 60)
+                    : String.format(java.util.Locale.US, "%d:%02d", totalSec / 60, totalSec % 60);
+            View row = addRow(rows, getString(R.string.sleep_timer_cancel),
+                    getString(R.string.sleep_timer_left, remaining));
+            first = row;
+            row.setOnClickListener(v -> {
+                SleepTimer.cancel(this);
+                Toast.makeText(this, R.string.sleep_timer_cancelled, Toast.LENGTH_SHORT).show();
+                finish();
+            });
+        }
+        
         for (int minutes : SleepTimer.MINUTES) {
             String label = SleepTimer.label(this, minutes);
             View row = addRow(rows, label, null);
@@ -41,16 +57,6 @@ public class SleepTimerActivity extends Activity {
                 finish();
             });
             if (first == null) first = row;
-        }
-        if (left > 0) {
-            int minLeft = (int) Math.max(1, (left + 59_999L) / 60_000L);
-            View row = addRow(rows, getString(R.string.sleep_timer_cancel),
-                    getString(R.string.sleep_timer_left, SleepTimer.label(this, minLeft)));
-            row.setOnClickListener(v -> {
-                SleepTimer.cancel(this);
-                Toast.makeText(this, R.string.sleep_timer_cancelled, Toast.LENGTH_SHORT).show();
-                finish();
-            });
         }
         if (!service) {
             TextView note = new TextView(this);
@@ -75,7 +81,11 @@ public class SleepTimerActivity extends Activity {
         row.findViewById(R.id.icon).setVisibility(View.GONE);
         row.findViewById(R.id.dot).setVisibility(View.GONE);
         ((TextView) row.findViewById(R.id.title)).setText(title);
-        ((TextView) row.findViewById(R.id.status)).setText(status == null ? "" : status);
+        TextView statusView = row.findViewById(R.id.status);
+        statusView.setText(status == null ? "" : status);
+        statusView.setTextSize(14f);
+        statusView.setTextColor(0xFFFFFFFF);
+        statusView.setVisibility(status == null ? View.GONE : View.VISIBLE);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.topMargin = rows.getChildCount() == 0 ? 0 : (int) (2 * getResources().getDisplayMetrics().density);
