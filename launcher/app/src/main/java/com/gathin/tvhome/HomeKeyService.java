@@ -2,6 +2,7 @@ package com.gathin.tvhome;
 
 import android.accessibilityservice.AccessibilityService;
 import android.content.Intent;
+import android.os.Build;
 import android.provider.Settings;
 import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityEvent;
@@ -20,6 +21,9 @@ import java.util.Map;
  */
 public class HomeKeyService extends AccessibilityService {
 
+    /** The connected service, so the sleep timer can ask it to lock the screen. Null while it is off. */
+    private static volatile HomeKeyService instance;
+
     /** Remote buttons that should open Settings (config.xml, settings_key_scancodes and settings_key_keycodes). */
     private int[] settingsScancodes = new int[0];
     private int[] settingsKeycodes = new int[0];
@@ -30,12 +34,40 @@ public class HomeKeyService extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
+        instance = this;
         settingsScancodes = getResources().getIntArray(R.array.settings_key_scancodes);
         // Keycodes and the panel choice can also come from a theme; theme.sh restarts this service.
         Config config = Config.load(this);
         settingsKeycodes = config.settingsKeycodes;
         settingsPanel = config.settingsKeyPanel;
         appKeys = RemoteKeys.parseAppKeys(config.appKeys);
+    }
+
+    @Override
+    public boolean onUnbind(Intent intent) {
+        if (instance == this) instance = null;
+        return super.onUnbind(intent);
+    }
+
+    @Override
+    public void onDestroy() {
+        if (instance == this) instance = null;
+        super.onDestroy();
+    }
+
+    /** True while the accessibility service is enabled and connected. */
+    static boolean isRunning() {
+        return instance != null;
+    }
+
+    /**
+     * Puts the screen to sleep with the system's lock-screen action (Android 9+). Returns false when the
+     * service is off or the TV refuses; some TV firmwares ignore the action.
+     */
+    static boolean sleepNow() {
+        HomeKeyService service = instance;
+        if (service == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return false;
+        return service.performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN);
     }
 
     private boolean isSettingsKey(KeyEvent event) {

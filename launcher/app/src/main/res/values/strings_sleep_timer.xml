@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="sleep_timer_title">Sleep timer</string>
+    <string name="sleep_timer_min">%1$d min</string>
+    <string name="sleep_timer_hour">%1$d h</string>
+    <string name="sleep_timer_hour_min">%1$d h %2$d min</string>
+    <string name="sleep_timer_set">TV turns off in %1$s</string>
+    <string name="sleep_timer_cancel">Cancel timer</string>
+    <string name="sleep_timer_left">%1$s left</string>
+    <string name="sleep_timer_cancelled">Sleep timer cancelled</string>
+    <string name="sleep_timer_need_service">Turn on the Home key service (install with HOME_KEY_SERVICE=1) so the timer can put the TV to sleep.</string>
+</resources>
