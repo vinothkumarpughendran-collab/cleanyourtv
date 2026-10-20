@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="control_center_title">Control center</string>
+    <string name="control_sleep_timer">Sleep timer</string>
+    <string name="control_power_off">Power off screen</string>
+    <string name="control_need_service">Home key service is off</string>
+    <string name="control_power_off_failed">Could not turn off the screen. Enable the Home key service, or this TV may not support it.</string>
+</resources>
