@@ -33,7 +33,11 @@ final class SleepTimer {
         long when = System.currentTimeMillis() + minutes * 60_000L;
         PendingIntent show = PendingIntent.getActivity(c, 1, new Intent(c, SleepTimerActivity.class),
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        am.setAlarmClock(new AlarmManager.AlarmClockInfo(when, show), fireIntent(c));
+        try {
+            am.setAlarmClock(new AlarmManager.AlarmClockInfo(when, show), fireIntent(c));
+        } catch (SecurityException e) {
+            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, when, fireIntent(c));
+        }
         prefs(c).edit().putLong(KEY_DEADLINE, when).apply();
     }
 
