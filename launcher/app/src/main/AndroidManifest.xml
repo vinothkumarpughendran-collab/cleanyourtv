@@ -100,6 +100,24 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Control Center: sleep timer and power off. Open over adb:
+             am start -n com.gathin.tvhome/.ControlCenterActivity -->
+        <activity
+            android:name=".ControlCenterActivity"
+            android:label="@string/control_center_title"
+            android:exported="true"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:screenOrientation="landscape"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <!-- Fires when the sleep timer runs out and puts the TV to sleep through HomeKeyService. -->
         <receiver
             android:name=".SleepTimerReceiver"
