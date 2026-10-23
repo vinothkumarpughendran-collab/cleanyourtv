@@ -99,6 +99,7 @@ public class HomeKeyService extends AccessibilityService {
 
     @Override
     public void onDestroy() {
+        if (instance == this) instance = null;
         stopWaitingForUnlock();
         if (gamepads != null) gamepads.stop();
         super.onDestroy();
