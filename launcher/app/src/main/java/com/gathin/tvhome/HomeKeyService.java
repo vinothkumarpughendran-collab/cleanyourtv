@@ -139,18 +139,6 @@ public class HomeKeyService extends AccessibilityService {
         }
     }
 
-    @Override
-    public boolean onUnbind(Intent intent) {
-        if (instance == this) instance = null;
-        return super.onUnbind(intent);
-    }
-
-    @Override
-    public void onDestroy() {
-        if (instance == this) instance = null;
-        super.onDestroy();
-    }
-
     /** True while the accessibility service is enabled and connected. */
     static boolean isRunning() {
         return instance != null;
@@ -211,6 +199,7 @@ public class HomeKeyService extends AccessibilityService {
     /** Unbound by Android: the user turned the helper off, so Home doesn't put it back (ServiceRepair). */
     @Override
     public boolean onUnbind(Intent intent) {
+        if (instance == this) instance = null;
         if (repairRecord) ServiceRepair.disconnected(this, getClass());
         return super.onUnbind(intent);
     }
