@@ -131,6 +131,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private TextView greeting;
     private View btnInputs;
     private TextView btnWifi;
+    private TextView btnSleep;
     private TextView shamsiDate;
     private TextView stats;
     private List<RaceWeekend.Race> raceCalendar;
@@ -317,6 +318,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         greeting = findViewById(R.id.greeting);
         greetingColor = greeting.getCurrentTextColor();
         btnWifi = findViewById(R.id.btnWifi);
+        btnSleep = findViewById(R.id.btnSleep);
+        btnSleep.setOnClickListener(v ->
+                startActivity(new Intent(this, SleepTimerActivity.class)));
         shamsiDate = findViewById(R.id.shamsiDate);
         stats = findViewById(R.id.stats);
         raceCalendar = cfg.raceCalendar;
@@ -506,6 +510,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         };
         btnInputs.setOnKeyListener(pillKeys);
         btnWifi.setOnKeyListener(pillKeys);
+        btnSleep.setOnKeyListener(pillKeys);
         btnSettings.setOnKeyListener(pillKeys);
         btnReorder.setOnKeyListener(pillKeys);
         if (advancedEffects) {

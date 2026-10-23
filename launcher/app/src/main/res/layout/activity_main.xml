@@ -314,6 +314,13 @@
                     android:nextFocusDown="@+id/grid" />
 
                 <TextView
+                    android:id="@+id/btnSleep"
+                    style="@style/TopButton"
+                    android:text="@string/sleep"
+                    android:drawableStart="@drawable/ic_sleep"
+                    android:nextFocusDown="@+id/grid" />
+
+                <TextView
                     android:id="@+id/btnWifi"
                     style="@style/TopButton"
                     android:maxWidth="180dp"
