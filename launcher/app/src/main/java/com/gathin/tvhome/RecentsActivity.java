@@ -6,11 +6,14 @@ import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.ActivityOptions;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Outline;
 import android.graphics.Rect;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -19,7 +22,9 @@ import android.util.DisplayMetrics;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewOutlineProvider;
 import android.view.animation.DecelerateInterpolator;
+import android.view.animation.PathInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -37,6 +42,9 @@ public class RecentsActivity extends Activity {
 
     /** How far the stacked cards sit left of the chosen one, as a share of the screen width, for 0 to 3 steps back. */
     private static final float[] STACK_X = {0f, 0.10f, 0.14f, 0.16f};
+
+    /** false: every app shows its high-resolution icon instead of its (often small) banner. */
+    private static final boolean USE_BANNERS = true;
 
     private static final class Entry {
         String pkg;
@@ -62,6 +70,7 @@ public class RecentsActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         showing = true;
+        overridePendingTransition(0, 0);
         created = SystemClock.uptimeMillis();
         DisplayMetrics m = getResources().getDisplayMetrics();
         dp = m.density;
@@ -83,7 +92,7 @@ public class RecentsActivity extends Activity {
         stage.setAlpha(0f);
         setContentView(stage);
         fill(Math.round((screenH - cardH - headH) / 2f));
-        stage.animate().alpha(1f).setDuration(180).start();
+        stage.animate().alpha(1f).setDuration(180).withLayer().start();
     }
 
     @Override
@@ -107,6 +116,7 @@ public class RecentsActivity extends Activity {
     public void finish() {
         if (!leaving && SystemClock.uptimeMillis() - created < 800) return;
         super.finish();
+        overridePendingTransition(0, 0);
     }
 
     private void fill(int top) {
@@ -140,16 +150,35 @@ public class RecentsActivity extends Activity {
         refreshSelection();
     }
 
+    /** The app's icon at the highest density it ships, so it stays sharp on a big card. */
+    private Drawable hiResIcon(PackageManager pm, String pkg, Drawable fallback) {
+        try {
+            ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+            if (ai.icon != 0) {
+                Drawable d = pm.getResourcesForApplication(ai)
+                        .getDrawableForDensity(ai.icon, DisplayMetrics.DENSITY_XXXHIGH, null);
+                if (d != null) return d;
+            }
+        } catch (PackageManager.NameNotFoundException | RuntimeException ignored) {
+        }
+        return fallback;
+    }
+
     private void addEntry(PackageManager pm, String pkg, Intent launch, int top)
             throws PackageManager.NameNotFoundException {
         CharSequence label = pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0));
         Drawable icon = pm.getApplicationIcon(pkg);
         Drawable art = pm.getActivityBanner(launch);
         if (art == null) art = pm.getApplicationBanner(pkg);
-        final boolean banner = art != null;
-        if (art == null) art = icon;
+        final boolean banner = USE_BANNERS && art != null;
+        if (!banner) art = icon;
 
-        FrameLayout item = new FrameLayout(this);
+        FrameLayout item = new FrameLayout(this) {
+            @Override
+            public boolean hasOverlappingRendering() {
+                return false;
+            }
+        };
         item.setClipChildren(false);
 
         LinearLayout head = new LinearLayout(this);
@@ -179,20 +208,33 @@ public class RecentsActivity extends Activity {
         card.setBackground(plate);
         card.setClipToOutline(true);
         ImageView logo = new ImageView(this);
-        logo.setImageDrawable(art);
+        FrameLayout.LayoutParams logoParams;
         if (banner) {
-            logo.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            card.addView(logo, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT));
-        } else {
+            // A banner is a small bitmap: show it at most 1.5 times its real size so it stays sharp.
+            logo.setImageDrawable(art);
             logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            int logoW = Math.round(cardH * 0.36f);
-            card.addView(logo, new FrameLayout.LayoutParams(logoW, logoW, Gravity.CENTER));
+            int srcW = art instanceof BitmapDrawable ? ((BitmapDrawable) art).getBitmap().getWidth() : 0;
+            int logoW = Math.round(cardW * 0.50f);
+            if (srcW > 0) logoW = Math.min(logoW, Math.round(srcW * 1.5f));
+            logoParams = new FrameLayout.LayoutParams(logoW, Math.round(logoW * 9f / 16f), Gravity.CENTER);
+            logo.setOutlineProvider(new ViewOutlineProvider() {
+                @Override
+                public void getOutline(View view, Outline outline) {
+                    outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), px(12));
+                }
+            });
+            logo.setClipToOutline(true);
+        } else {
+            logo.setImageDrawable(hiResIcon(pm, pkg, art));
+            logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            int logoW = Math.round(cardH * 0.42f);
+            logoParams = new FrameLayout.LayoutParams(logoW, logoW, Gravity.CENTER);
         }
+        card.addView(logo, logoParams);
         GradientDrawable ring = new GradientDrawable();
         ring.setCornerRadius(px(22));
         ring.setColor(Color.TRANSPARENT);
-        ring.setStroke(px(1), 0x33FFFFFF);
+        ring.setStroke(px(3), 0x1AFFFFFF);
         card.setForeground(ring);
         FrameLayout.LayoutParams cardParams = new FrameLayout.LayoutParams(cardW, cardH);
         cardParams.topMargin = headH;
@@ -304,7 +346,6 @@ public class RecentsActivity extends Activity {
             e.item.setAlpha(a);
             e.item.setTranslationZ(10f - Math.abs(d));
             e.item.setVisibility(a <= 0.01f ? View.INVISIBLE : View.VISIBLE);
-            e.name.setAlpha(Math.max(0f, 1f - 2f * Math.abs(d)));
         }
     }
 
@@ -314,11 +355,13 @@ public class RecentsActivity extends Activity {
         }
         if (slide != null) slide.cancel();
         slide = ValueAnimator.ofFloat(pos, target);
-        slide.setDuration(300);
-        slide.setInterpolator(new DecelerateInterpolator(1.6f));
+        slide.setDuration(380);
+        slide.setInterpolator(new PathInterpolator(0.2f, 0f, 0f, 1f));
+        layers(true);
         slide.addUpdateListener(a -> {
             pos = (Float) a.getAnimatedValue();
             place();
+            if (a.getAnimatedFraction() >= 1f) layers(false);
         });
         slide.start();
     }
@@ -394,24 +437,45 @@ public class RecentsActivity extends Activity {
         hint.postDelayed(hideHint, ms);
     }
 
-    /** The chosen card gets a bright border and its dot turns into a white bar. */
+    private final List<View> dotViews = new ArrayList<>();
+    private final List<GradientDrawable> dotShapes = new ArrayList<>();
+
+    /** While cards slide they are GPU layers, so moving them costs nothing but compositing. */
+    private void layers(boolean on) {
+        for (Entry e : entries) {
+            e.item.setLayerType(on ? View.LAYER_TYPE_HARDWARE : View.LAYER_TYPE_NONE, null);
+        }
+    }
+
+    /** The chosen card gets a bright border and its name; the dots are reused, not rebuilt. */
     private void refreshSelection() {
         for (int i = 0; i < entries.size(); i++) {
-            entries.get(i).ring.setStroke(px(i == index ? 4 : 1), i == index ? 0xCCFFFFFF : 0x33FFFFFF);
+            Entry e = entries.get(i);
+            e.ring.setStroke(px(3), i == index ? 0xCCFFFFFF : 0x1AFFFFFF);
+            e.name.animate().alpha(i == index ? 1f : 0f).setDuration(150).start();
         }
         if (dots == null) return;
-        dots.removeAllViews();
         int n = Math.min(entries.size(), 12);
-        for (int i = 0; i < n; i++) {
+        while (dotViews.size() > n) {
+            dots.removeView(dotViews.remove(dotViews.size() - 1));
+            dotShapes.remove(dotShapes.size() - 1);
+        }
+        while (dotViews.size() < n) {
             View dot = new View(this);
             GradientDrawable shape = new GradientDrawable();
-            shape.setCornerRadius(px(4));
-            shape.setColor(i == index ? 0xFFFFFFFF : 0x59FFFFFF);
+            shape.setShape(GradientDrawable.OVAL);
             dot.setBackground(shape);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(i == index ? 22 : 8), px(8));
-            lp.leftMargin = px(4);
-            lp.rightMargin = px(4);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(8), px(8));
+            lp.leftMargin = px(5);
+            lp.rightMargin = px(5);
             dots.addView(dot, lp);
+            dotViews.add(dot);
+            dotShapes.add(shape);
+        }
+        for (int i = 0; i < n; i++) {
+            float scale = i == index ? 1.6f : 1f;
+            dotShapes.get(i).setColor(i == index ? 0xFFFFFFFF : 0x59FFFFFF);
+            dotViews.get(i).animate().scaleX(scale).scaleY(scale).setDuration(150).start();
         }
     }
 
