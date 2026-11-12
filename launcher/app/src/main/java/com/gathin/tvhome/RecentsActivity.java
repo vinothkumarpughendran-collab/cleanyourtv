@@ -473,7 +473,7 @@ public class RecentsActivity extends Activity {
         int shown = ui.getInt("hint", 0);
         if (shown < 3) {
             ui.edit().putInt("hint", shown + 1).apply();
-            note("Left / Right browse  -  OK open  -  hold OK info  -  Up close app  -  Down twice close all  -  hold Down settings", 6000);
+            note("Left / Right browse  -  OK open  -  hold OK info  -  Up remove app  -  Down twice clear list  -  hold Down settings", 6000);
         }
     }
 
@@ -541,21 +541,20 @@ public class RecentsActivity extends Activity {
         memView.setText((mi.availMem >> 20) + " MB free of " + (mi.totalMem >> 20) + " MB");
     }
 
-    /** Down once asks, Down again within 2.5 seconds closes every app and reports what it freed. */
+    /** Down once asks, Down again within 2.5 seconds clears the whole list (best effort to close the apps). */
     private void clearAll() {
         if (entries.isEmpty()) return;
         long now = SystemClock.uptimeMillis();
         if (now > clearArmed) {
             clearArmed = now + 2500;
-            note("Press Down again to close all apps", 2500);
+            note("Press Down again to clear the list", 2500);
             return;
         }
         clearArmed = 0;
-        final long before = memoryInfo().availMem;
         final int count = entries.size();
-        ActivityManager am = getSystemService(ActivityManager.class);
         final String front = RecentApps.front;
         boolean frontIncluded = false;
+        ActivityManager am = getSystemService(ActivityManager.class);
         for (Entry e : entries) {
             if (e.pkg.equals(front)) {
                 frontIncluded = true;
@@ -570,13 +569,9 @@ public class RecentsActivity extends Activity {
         }
         entries.clear();
         refreshSelection();
-        stage.postDelayed(() -> {
-            updateMemory();
-            long gained = Math.max(0L, (memoryInfo().availMem - before) >> 20);
-            note("Closed " + count + (count == 1 ? " app" : " apps") + "  -  about " + gained + " MB freed", 2600);
-        }, 900);
-        if (frontIncluded) stage.postDelayed(() -> killApp(front), 3000);
-        else stage.postDelayed(this::leave, 3000);
+        note("Cleared " + count + (count == 1 ? " app" : " apps") + " from this list", 2000);
+        if (frontIncluded) stage.postDelayed(() -> killApp(front), 2200);
+        else stage.postDelayed(this::leave, 2200);
     }
 
     // ----- pins -----
@@ -709,7 +704,7 @@ public class RecentsActivity extends Activity {
         if (entries.isEmpty() || dialogUp) return;
         final Entry e = entries.get(index);
         final boolean pinned = pins().contains(e.pkg);
-        final String[] items = {pinned ? "Remove pin" : "Pin to front", "Close app (free memory)",
+        final String[] items = {pinned ? "Remove pin" : "Pin to front", "Remove from list",
                 "Force stop / app info", "Uninstall"};
         dialogUp = true;
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
