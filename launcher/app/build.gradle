@@ -15,6 +15,8 @@ android {
         targetSdk 34
         versionCode 13
         versionName '3.4'
+        // Lite build: English strings only; other languages fall back to the default (English) resources.
+        resourceConfigurations += ['en']
     }
 
     buildTypes {
