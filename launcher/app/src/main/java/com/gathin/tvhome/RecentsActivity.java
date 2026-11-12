@@ -49,6 +49,72 @@ public class RecentsActivity extends Activity {
     /** false: every app shows its high-resolution icon instead of its (often small) banner. */
     private static final boolean USE_BANNERS = true;
 
+    /** Everything the cards need about one app, loaded once in the background. */
+    private static final class Look {
+        String label;
+        int tint;
+        Drawable icon, art, hi;
+        Drawable.ConstantState iconCs, artCs, hiCs;
+        boolean ok = true;
+    }
+
+    private static final java.util.Map<String, Look> LOOKS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.Set<String> LOADING =
+            java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
+    private static final java.util.Set<String> MISSES =
+            java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
+    private static final java.util.concurrent.ExecutorService LOADER =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "look-loader");
+                t.setPriority(Thread.MIN_PRIORITY);
+                return t;
+            });
+
+    /** Called by the key helper whenever an app's window shows: loads its look in the background, once. */
+    static void warm(final android.content.Context c, final String pkg) {
+        if (pkg == null || LOOKS.containsKey(pkg) || MISSES.contains(pkg) || LOOKS.size() >= 40) return;
+        if (pkg.equals(c.getPackageName()) || pkg.equals("com.android.systemui")) return;
+        if (!LOADING.add(pkg)) return;
+        final android.content.Context app = c.getApplicationContext();
+        LOADER.execute(() -> {
+            try {
+                Look l = loadLook(app, pkg);
+                if (l == null) MISSES.add(pkg);
+                else if (l.ok) LOOKS.put(pkg, l);
+            } catch (RuntimeException | PackageManager.NameNotFoundException ignored) {
+            } finally {
+                LOADING.remove(pkg);
+            }
+        });
+    }
+
+    private static Look loadLook(android.content.Context c, String pkg) throws PackageManager.NameNotFoundException {
+        PackageManager pm = c.getPackageManager();
+        Intent launch = pm.getLeanbackLaunchIntentForPackage(pkg);
+        if (launch == null) launch = pm.getLaunchIntentForPackage(pkg);
+        if (launch == null) return null;
+        Look l = new Look();
+        l.label = String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)));
+        l.icon = pm.getApplicationIcon(pkg);
+        Drawable art = null;
+        if (USE_BANNERS) {
+            art = pm.getActivityBanner(launch);
+            if (art == null) art = pm.getApplicationBanner(pkg);
+        }
+        l.art = art;
+        l.tint = dominant(art != null ? art : l.icon, (pkg.hashCode() & 0x7fffffff) % 360);
+        if (art == null) l.hi = hiResIcon(pm, pkg, l.icon);
+        l.iconCs = l.icon.getConstantState();
+        l.artCs = art != null ? art.getConstantState() : null;
+        l.hiCs = l.hi != null ? l.hi.getConstantState() : null;
+        l.ok = l.iconCs != null && (art == null || l.artCs != null) && (l.hi == null || l.hiCs != null);
+        return l;
+    }
+
+    private Drawable make(Drawable.ConstantState cs, Drawable direct) {
+        return cs != null ? cs.newDrawable(getResources()) : direct;
+    }
+
     private static final class Entry {
         String pkg;
         Intent launch;
@@ -180,7 +246,7 @@ public class RecentsActivity extends Activity {
     }
 
     /** The app's icon at the highest density it ships, so it stays sharp on a big card. */
-    private Drawable hiResIcon(PackageManager pm, String pkg, Drawable fallback) {
+    private static Drawable hiResIcon(PackageManager pm, String pkg, Drawable fallback) {
         try {
             ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
             if (ai.icon != 0) {
@@ -195,11 +261,16 @@ public class RecentsActivity extends Activity {
 
     private void addEntry(PackageManager pm, String pkg, Intent launch, int top)
             throws PackageManager.NameNotFoundException {
-        CharSequence label = pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0));
-        Drawable icon = pm.getApplicationIcon(pkg);
-        Drawable art = pm.getActivityBanner(launch);
-        if (art == null) art = pm.getApplicationBanner(pkg);
-        final boolean banner = USE_BANNERS && art != null;
+        Look look = LOOKS.get(pkg);
+        if (look == null) {
+            look = loadLook(this, pkg);
+            if (look == null) throw new PackageManager.NameNotFoundException(pkg);
+            if (look.ok) LOOKS.put(pkg, look);
+        }
+        CharSequence label = look.label;
+        Drawable icon = make(look.iconCs, look.icon);
+        Drawable art = look.art != null ? make(look.artCs, look.art) : null;
+        final boolean banner = art != null;
         if (!banner) art = icon;
 
         FrameLayout item = new FrameLayout(this) {
@@ -229,7 +300,7 @@ public class RecentsActivity extends Activity {
         item.addView(head, new FrameLayout.LayoutParams(cardW, headH));
 
         // The app's own colour, taken from its artwork; apps with grey or white logos keep a hashed hue.
-        final int tint = dominant(art, (pkg.hashCode() & 0x7fffffff) % 360);
+        final int tint = look.tint;
         float[] hsv = new float[3];
         Color.colorToHSV(tint, hsv);
         GradientDrawable plate = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
@@ -258,7 +329,7 @@ public class RecentsActivity extends Activity {
             });
             logo.setClipToOutline(true);
         } else {
-            logo.setImageDrawable(hiResIcon(pm, pkg, art));
+            logo.setImageDrawable(make(look.hiCs, look.hi));
             logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
             int logoW = Math.round(cardH * 0.42f);
             logoParams = new FrameLayout.LayoutParams(logoW, logoW, Gravity.CENTER);
@@ -489,8 +560,9 @@ public class RecentsActivity extends Activity {
 
     /** While cards slide they are GPU layers, so moving them costs nothing but compositing. */
     private void layers(boolean on) {
-        for (Entry e : entries) {
-            e.item.setLayerType(on ? View.LAYER_TYPE_HARDWARE : View.LAYER_TYPE_NONE, null);
+        for (int i = 0; i < entries.size(); i++) {
+            boolean near = Math.abs(i - index) <= 2;
+            entries.get(i).item.setLayerType(on && near ? View.LAYER_TYPE_HARDWARE : View.LAYER_TYPE_NONE, null);
         }
     }
 

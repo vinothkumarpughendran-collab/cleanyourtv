@@ -368,7 +368,10 @@ public class HomeKeyService extends AccessibilityService {
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return;
-        if (switcherOn && event.getPackageName() != null) RecentApps.note(this, event.getPackageName().toString());
+        if (switcherOn && event.getPackageName() != null) {
+            RecentApps.note(this, event.getPackageName().toString());
+            RecentsActivity.warm(this, event.getPackageName().toString());
+        }
         // app_keys "front:" entries: only activities count, so a toast or the volume bar doesn't change the app in front.
         if ((!frontAppKeys.isEmpty() || !frontAppScancodes.isEmpty())
                 && event.getPackageName() != null && event.getClassName() != null) {
