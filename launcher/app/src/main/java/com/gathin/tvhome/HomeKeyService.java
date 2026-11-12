@@ -346,6 +346,11 @@ public class HomeKeyService extends AccessibilityService {
             backDown = true;
             backHeld = false;
             handler.removeCallbacks(holdBack);
+            try {
+                int saved = getSharedPreferences("recents_ui", MODE_PRIVATE).getInt("hold_ms", 0);
+                if (saved > 0) backHoldMs = Math.max(250, Math.min(1500, saved));
+            } catch (RuntimeException ignored) {
+            }
             handler.postDelayed(holdBack, backHoldMs);
             return true;
         }
