@@ -45,6 +45,7 @@ public class RecentsActivity extends Activity {
         View name;
         View card;
         int tint;
+        GradientDrawable ring;
     }
 
     private final List<Entry> entries = new ArrayList<>();
@@ -135,6 +136,8 @@ public class RecentsActivity extends Activity {
         place();
         bg = darken(entries.get(index).tint);
         stage.setBackgroundColor(bg);
+        buildHud();
+        refreshSelection();
     }
 
     private void addEntry(PackageManager pm, String pkg, Intent launch, int top)
@@ -177,10 +180,20 @@ public class RecentsActivity extends Activity {
         card.setClipToOutline(true);
         ImageView logo = new ImageView(this);
         logo.setImageDrawable(art);
-        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        int logoW = banner ? Math.round(cardW * 0.46f) : Math.round(cardH * 0.36f);
-        int logoH = banner ? Math.round(logoW * 9f / 16f) : logoW;
-        card.addView(logo, new FrameLayout.LayoutParams(logoW, logoH, Gravity.CENTER));
+        if (banner) {
+            logo.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            card.addView(logo, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT));
+        } else {
+            logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            int logoW = Math.round(cardH * 0.36f);
+            card.addView(logo, new FrameLayout.LayoutParams(logoW, logoW, Gravity.CENTER));
+        }
+        GradientDrawable ring = new GradientDrawable();
+        ring.setCornerRadius(px(22));
+        ring.setColor(Color.TRANSPARENT);
+        ring.setStroke(px(1), 0x33FFFFFF);
+        card.setForeground(ring);
         FrameLayout.LayoutParams cardParams = new FrameLayout.LayoutParams(cardW, cardH);
         cardParams.topMargin = headH;
         item.addView(card, cardParams);
@@ -198,6 +211,7 @@ public class RecentsActivity extends Activity {
         e.name = name;
         e.card = card;
         e.tint = tint;
+        e.ring = ring;
         entries.add(e);
     }
 
@@ -313,6 +327,7 @@ public class RecentsActivity extends Activity {
         int target = Math.max(0, Math.min(entries.size() - 1, index + delta));
         if (target == index) return;
         index = target;
+        refreshSelection();
         slideTo(index);
     }
 
@@ -334,10 +349,93 @@ public class RecentsActivity extends Activity {
                 if (event.getRepeatCount() == 0) closeApp();
                 return true;
             case KeyEvent.KEYCODE_DPAD_DOWN:
+                if (event.getRepeatCount() == 0) clearAll();
                 return true;
             default:
                 return super.onKeyDown(keyCode, event);
         }
+    }
+
+    private LinearLayout dots;
+    private TextView hint;
+    private long clearArmed;
+    private final Runnable hideHint = () -> {
+        if (hint != null) hint.setVisibility(View.INVISIBLE);
+    };
+
+    /** The position dots, and a hint line that shows for the first three openings only. */
+    private void buildHud() {
+        dots = new LinearLayout(this);
+        dots.setGravity(Gravity.CENTER);
+        FrameLayout.LayoutParams dotsParams = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        dotsParams.bottomMargin = px(64);
+        stage.addView(dots, dotsParams);
+        hint = new TextView(this);
+        hint.setTextColor(0xB3FFFFFF);
+        hint.setTextSize(18);
+        hint.setVisibility(View.INVISIBLE);
+        FrameLayout.LayoutParams hintParams = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        hintParams.bottomMargin = px(24);
+        stage.addView(hint, hintParams);
+        android.content.SharedPreferences ui = getSharedPreferences("recents_ui", MODE_PRIVATE);
+        int shown = ui.getInt("hint", 0);
+        if (shown < 3) {
+            ui.edit().putInt("hint", shown + 1).apply();
+            note("Left / Right browse  -  OK open  -  Up close app  -  Down twice close all", 5000);
+        }
+    }
+
+    private void note(String text, long ms) {
+        hint.setText(text);
+        hint.setVisibility(View.VISIBLE);
+        hint.removeCallbacks(hideHint);
+        hint.postDelayed(hideHint, ms);
+    }
+
+    /** The chosen card gets a bright border and its dot turns into a white bar. */
+    private void refreshSelection() {
+        for (int i = 0; i < entries.size(); i++) {
+            entries.get(i).ring.setStroke(px(i == index ? 4 : 1), i == index ? 0xCCFFFFFF : 0x33FFFFFF);
+        }
+        if (dots == null) return;
+        dots.removeAllViews();
+        int n = Math.min(entries.size(), 12);
+        for (int i = 0; i < n; i++) {
+            View dot = new View(this);
+            GradientDrawable shape = new GradientDrawable();
+            shape.setCornerRadius(px(4));
+            shape.setColor(i == index ? 0xFFFFFFFF : 0x59FFFFFF);
+            dot.setBackground(shape);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(i == index ? 22 : 8), px(8));
+            lp.leftMargin = px(4);
+            lp.rightMargin = px(4);
+            dots.addView(dot, lp);
+        }
+    }
+
+    /** Down once asks, Down again within 2.5 seconds closes every app in the list. */
+    private void clearAll() {
+        if (entries.isEmpty()) return;
+        long now = SystemClock.uptimeMillis();
+        if (now > clearArmed) {
+            clearArmed = now + 2500;
+            note("Press Down again to close all apps", 2500);
+            return;
+        }
+        clearArmed = 0;
+        ActivityManager am = getSystemService(ActivityManager.class);
+        for (Entry e : entries) {
+            try {
+                if (am != null) am.killBackgroundProcesses(e.pkg);
+            } catch (RuntimeException ignored) {
+            }
+            RecentApps.remove(this, e.pkg);
+            e.item.animate().translationYBy(-px(260)).alpha(0f).setDuration(220).start();
+        }
+        entries.clear();
+        stage.postDelayed(this::leave, 260);
     }
 
     private void open() {
@@ -372,6 +470,7 @@ public class RecentsActivity extends Activity {
         } else {
             pos = Math.max(0f, index - 0.6f);
         }
+        refreshSelection();
         place();
         slideTo(index);
     }
