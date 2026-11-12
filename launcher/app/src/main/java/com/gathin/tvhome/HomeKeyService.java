@@ -100,6 +100,8 @@ public class HomeKeyService extends AccessibilityService {
         super.onServiceConnected();
         running = this;
         settingsScancodes = getResources().getIntArray(R.array.settings_key_scancodes);
+        switcherOn = getResources().getBoolean(R.bool.app_switcher);
+        backHoldMs = Math.max(250, Math.min(1500, getResources().getInteger(R.integer.app_switcher_hold_ms)));
         // The service is directBootAware: Android 11 skips a service that is not while the user is still
         // locked at boot, writes accessibility_enabled=0 and, on TCL G03 firmware, never binds it after the
         // unlock. Config.load reads credential-protected storage, so wait for the unlock before reading it.
@@ -225,7 +227,7 @@ public class HomeKeyService extends AccessibilityService {
         }
         // home_key_service.xml subscribes to no events, so the redirects ask for window changes only when one is on.
         AccessibilityServiceInfo info = getServiceInfo();
-        if (info != null && (!stockHome.isEmpty() || !powerOnLiveTv.isEmpty() || watchFront)) {
+        if (info != null && (!stockHome.isEmpty() || !powerOnLiveTv.isEmpty() || watchFront || switcherOn)) {
             info.eventTypes |= AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED;
             setServiceInfo(info);
         }
@@ -277,6 +279,7 @@ public class HomeKeyService extends AccessibilityService {
             powerOnUntil = 0;
         }
         if (consumeVolumeKeys && VolumeKeys.handle(this, event)) return true;
+        if (event.getKeyCode() == KeyEvent.KEYCODE_BACK && backLongPress(event)) return true;
         // A scancode entry is more specific than any keycode, so it goes first.
         if (RemoteKeys.handle(this, event, inFront(appScancodes, frontAppScancodes, event.getScanCode()),
                 holdAppScancodes.get(event.getScanCode()))) return true;
@@ -317,9 +320,50 @@ public class HomeKeyService extends AccessibilityService {
         return super.onUnbind(intent);
     }
 
+    /** The app switcher: hold Back (app_switcher and app_switcher_hold_ms in config.xml). */
+    private boolean switcherOn = true;
+    private long backHoldMs = 500;
+
+    /** Back held for backHoldMs opens the switcher; a short press is sent on at release, as a normal Back. */
+    private boolean backDown;
+    private boolean backHeld;
+    private long backReplayUntil;
+    private final Runnable holdBack = () -> {
+        if (!backDown) return;
+        backHeld = true;
+        try {
+            startActivity(new Intent(this, RecentsActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        } catch (ActivityNotFoundException | SecurityException ignored) {
+        }
+    };
+
+    private boolean backLongPress(KeyEvent event) {
+        if (!switcherOn) return false;
+        if (SystemClock.uptimeMillis() < backReplayUntil) return false;
+        if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            if (RecentsActivity.showing) return false;
+            if (event.getRepeatCount() != 0) return backDown;
+            backDown = true;
+            backHeld = false;
+            handler.removeCallbacks(holdBack);
+            handler.postDelayed(holdBack, backHoldMs);
+            return true;
+        }
+        if (!backDown) return false;
+        backDown = false;
+        handler.removeCallbacks(holdBack);
+        if (!backHeld && !event.isCanceled()) {
+            backReplayUntil = SystemClock.uptimeMillis() + 300;
+            performGlobalAction(GLOBAL_ACTION_BACK);
+        }
+        backHeld = false;
+        return true;
+    }
+
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return;
+        if (switcherOn && event.getPackageName() != null) RecentApps.note(this, event.getPackageName().toString());
         // app_keys "front:" entries: only activities count, so a toast or the volume bar doesn't change the app in front.
         if ((!frontAppKeys.isEmpty() || !frontAppScancodes.isEmpty())
                 && event.getPackageName() != null && event.getClassName() != null) {

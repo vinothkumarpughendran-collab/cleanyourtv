@@ -539,4 +539,11 @@
     <!-- Tiles drawn from the app's icon and name instead of its banner (for banners that crop badly). -->
     <string-array name="icon_tiles" translatable="false">
     </string-array>
+
+    <!-- App switcher: hold Back to see your recent apps as cards (Left or Right to browse, OK to open, Up to close
+         the app, Back to leave). A short press of Back still goes back as usual. Needs the key helper
+         (HOME_KEY_SERVICE=1) and key_filter on. -->
+    <bool name="app_switcher">true</bool>
+    <!-- How long Back is held, in milliseconds, before the switcher opens (250 to 1500). -->
+    <integer name="app_switcher_hold_ms">500</integer>
 </resources>
