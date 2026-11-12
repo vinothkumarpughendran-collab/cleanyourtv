@@ -1,12 +1,16 @@
 package com.gathin.tvhome;
 
+import android.animation.ArgbEvaluator;
 import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.ActivityOptions;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -40,6 +44,7 @@ public class RecentsActivity extends Activity {
         View item;
         View name;
         View card;
+        int tint;
     }
 
     private final List<Entry> entries = new ArrayList<>();
@@ -72,7 +77,7 @@ public class RecentsActivity extends Activity {
         base = Math.round(screenW * 0.17f);
 
         stage = new FrameLayout(this);
-        stage.setBackgroundColor(0xEE0A0C14);
+        stage.setBackgroundColor(0xFF0A0C14);
         stage.setClipChildren(false);
         stage.setAlpha(0f);
         setContentView(stage);
@@ -116,13 +121,20 @@ public class RecentsActivity extends Activity {
             }
         }
         if (entries.isEmpty()) {
-            Toast.makeText(this, R.string.recents_none, Toast.LENGTH_SHORT).show();
-            leave();
+            TextView none = new TextView(this);
+            none.setText(R.string.recents_none);
+            none.setTextColor(Color.WHITE);
+            none.setTextSize(26);
+            stage.addView(none, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+            stage.postDelayed(this::leave, 2500);
             return;
         }
         index = entries.size() > 1 && entries.get(0).pkg.equals(RecentApps.front) ? 1 : 0;
         pos = index;
         place();
+        bg = darken(entries.get(index).tint);
+        stage.setBackgroundColor(bg);
     }
 
     private void addEntry(PackageManager pm, String pkg, Intent launch, int top)
@@ -151,10 +163,13 @@ public class RecentsActivity extends Activity {
         head.addView(name);
         item.addView(head, new FrameLayout.LayoutParams(cardW, headH));
 
-        // A fixed tint per app, so the same app always has the same colour and nothing has to be drawn to find it.
-        float hue = (pkg.hashCode() & 0x7fffffff) % 360;
+        // The app's own colour, taken from its artwork; apps with grey or white logos keep a hashed hue.
+        final int tint = dominant(art, (pkg.hashCode() & 0x7fffffff) % 360);
+        float[] hsv = new float[3];
+        Color.colorToHSV(tint, hsv);
         GradientDrawable plate = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[]{Color.HSVToColor(new float[]{hue, 0.45f, 0.50f}), Color.HSVToColor(new float[]{hue, 0.55f, 0.17f})});
+                new int[]{Color.HSVToColor(new float[]{hsv[0], hsv[1], 0.62f}),
+                        Color.HSVToColor(new float[]{hsv[0], Math.min(1f, hsv[1] + 0.10f), 0.20f})});
         plate.setCornerRadius(px(22));
         plate.setStroke(px(1), 0x33FFFFFF);
         FrameLayout card = new FrameLayout(this);
@@ -182,7 +197,72 @@ public class RecentsActivity extends Activity {
         e.item = item;
         e.name = name;
         e.card = card;
+        e.tint = tint;
         entries.add(e);
+    }
+
+    private int bg = 0xFF0A0C14;
+    private ValueAnimator bgAnim;
+
+    /** A dark, opaque version of the app's colour for the screen behind the cards. */
+    private static int darken(int tint) {
+        float[] hsv = new float[3];
+        Color.colorToHSV(tint, hsv);
+        return Color.HSVToColor(new float[]{hsv[0], Math.min(1f, hsv[1] * 0.9f), 0.20f});
+    }
+
+    private void tintBackground(int tint) {
+        final int to = darken(tint);
+        if (to == bg) return;
+        if (bgAnim != null) bgAnim.cancel();
+        bgAnim = ValueAnimator.ofObject(new ArgbEvaluator(), bg, to);
+        bgAnim.setDuration(300);
+        bgAnim.addUpdateListener(a -> {
+            bg = (Integer) a.getAnimatedValue();
+            stage.setBackgroundColor(bg);
+        });
+        bgAnim.start();
+    }
+
+    /** The most common saturated hue in a 24 by 24 copy of the artwork, or the fallback hue when it has none. */
+    private static int dominant(Drawable d, int fallbackHue) {
+        float[] hsv = new float[3];
+        float[] weight = new float[36];
+        float[] sat = new float[36];
+        int[] count = new int[36];
+        try {
+            int n = 24;
+            Bitmap b = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888);
+            Rect old = d.copyBounds();
+            d.setBounds(0, 0, n, n);
+            d.draw(new Canvas(b));
+            d.setBounds(old);
+            for (int y = 0; y < n; y++) {
+                for (int x = 0; x < n; x++) {
+                    int p = b.getPixel(x, y);
+                    if (Color.alpha(p) < 128) continue;
+                    Color.colorToHSV(p, hsv);
+                    if (hsv[1] < 0.25f || hsv[2] < 0.25f) continue;
+                    int k = Math.min(35, (int) (hsv[0] / 10f));
+                    weight[k] += hsv[1] * hsv[2];
+                    sat[k] += hsv[1];
+                    count[k]++;
+                }
+            }
+            b.recycle();
+        } catch (RuntimeException ignored) {
+        }
+        int best = -1;
+        float top = 0f;
+        for (int k = 0; k < 36; k++) {
+            if (weight[k] > top) {
+                top = weight[k];
+                best = k;
+            }
+        }
+        if (best < 0 || top < 3f) return Color.HSVToColor(new float[]{fallbackHue, 0.50f, 0.60f});
+        float s = Math.max(0.45f, Math.min(0.85f, sat[best] / count[best]));
+        return Color.HSVToColor(new float[]{best * 10f + 5f, s, 0.60f});
     }
 
     /** Puts every card where it belongs for the current (fractional) position. */
@@ -215,6 +295,9 @@ public class RecentsActivity extends Activity {
     }
 
     private void slideTo(float target) {
+        if (!entries.isEmpty()) {
+            tintBackground(entries.get(Math.max(0, Math.min(entries.size() - 1, Math.round(target)))).tint);
+        }
         if (slide != null) slide.cancel();
         slide = ValueAnimator.ofFloat(pos, target);
         slide.setDuration(300);
