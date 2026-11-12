@@ -554,10 +554,16 @@ public class RecentsActivity extends Activity {
         final long before = memoryInfo().availMem;
         final int count = entries.size();
         ActivityManager am = getSystemService(ActivityManager.class);
+        final String front = RecentApps.front;
+        boolean frontIncluded = false;
         for (Entry e : entries) {
-            try {
-                if (am != null) am.killBackgroundProcesses(e.pkg);
-            } catch (RuntimeException ignored) {
+            if (e.pkg.equals(front)) {
+                frontIncluded = true;
+            } else {
+                try {
+                    if (am != null) am.killBackgroundProcesses(e.pkg);
+                } catch (RuntimeException ignored) {
+                }
             }
             RecentApps.remove(this, e.pkg);
             e.item.animate().translationYBy(-px(260)).alpha(0f).setDuration(220).start();
@@ -569,7 +575,8 @@ public class RecentsActivity extends Activity {
             long gained = Math.max(0L, (memoryInfo().availMem - before) >> 20);
             note("Closed " + count + (count == 1 ? " app" : " apps") + "  -  about " + gained + " MB freed", 2600);
         }, 900);
-        stage.postDelayed(this::leave, 3000);
+        if (frontIncluded) stage.postDelayed(() -> killApp(front), 3000);
+        else stage.postDelayed(this::leave, 3000);
     }
 
     // ----- pins -----
@@ -787,14 +794,45 @@ public class RecentsActivity extends Activity {
         leave();
     }
 
+    /** Home first, then kill: Android will not kill an app that is still on screen. */
+    private void goHome() {
+        try {
+            startActivity(new Intent(this, MainActivity.class).addCategory(Intent.CATEGORY_HOME)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED));
+        } catch (RuntimeException ignored) {
+        }
+        leave();
+    }
+
+    private void killApp(final String pkg) {
+        final ActivityManager am = getApplicationContext().getSystemService(ActivityManager.class);
+        if (am == null) return;
+        android.util.Log.i("SwitcherKill", "killApp " + pkg + " front=" + RecentApps.front);
+        if (!pkg.equals(RecentApps.front)) {
+            try {
+                am.killBackgroundProcesses(pkg);
+                android.util.Log.i("SwitcherKill", "killBackgroundProcesses called for " + pkg);
+            } catch (RuntimeException failed) {
+                android.util.Log.e("SwitcherKill", "kill failed for " + pkg, failed);
+            }
+            return;
+        }
+        goHome();
+        final android.os.Handler later = new android.os.Handler(android.os.Looper.getMainLooper());
+        final Runnable kill = () -> {
+            try {
+                am.killBackgroundProcesses(pkg);
+            } catch (RuntimeException ignored) {
+            }
+        };
+        later.postDelayed(kill, 900);
+        later.postDelayed(kill, 2000);
+    }
+
     private void closeApp() {
         if (entries.isEmpty()) return;
         final Entry e = entries.remove(index);
-        try {
-            ActivityManager am = getSystemService(ActivityManager.class);
-            if (am != null) am.killBackgroundProcesses(e.pkg);
-        } catch (RuntimeException ignored) {
-        }
+        killApp(e.pkg);
         RecentApps.remove(this, e.pkg);
         e.item.animate().translationYBy(-px(260)).alpha(0f).setDuration(220)
                 .withEndAction(() -> stage.removeView(e.item)).start();
